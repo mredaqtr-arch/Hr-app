@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>نظام شؤون الموظفين والرواتب</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/htm@3.1.1/dist/htm.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="theme-color" content="#0f6b57">
+<style>
+:root{--bg:#f3f5f4;--card:#fff;--ink:#14231f;--mut:#5d6f69;--line:#dde5e2;--pri:#0f6b57;--pri2:#e3f2ee;--bad:#b42318;--ok:#15803d;color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1715;--card:#18231f;--ink:#e8f0ed;--mut:#9bb0a9;--line:#2a3a35;--pri:#3fbf9f;--pri2:#16312b;--bad:#f2766b;--ok:#4ade80;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0f1715;--card:#18231f;--ink:#e8f0ed;--mut:#9bb0a9;--line:#2a3a35;--pri:#3fbf9f;--pri2:#16312b;--bad:#f2766b;--ok:#4ade80;color-scheme:dark}
+html,body{background:var(--bg);color:var(--ink);font-family:Cairo,Tahoma,sans-serif}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px}
+.inp{width:100%;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:10px;padding:.55rem .75rem}
+.inp:focus,.btn:focus-visible{outline:2px solid var(--pri);outline-offset:1px}
+.btn{background:var(--pri);color:#fff;border-radius:10px;padding:.5rem 1rem;font-weight:600;display:inline-flex;gap:.4rem;align-items:center}
+[data-theme="dark"] .btn,:root:not([data-theme="light"]) .btn{color:#06251d}
+.btn2{background:transparent;color:var(--ink);border:1px solid var(--line)}
+.bad{background:var(--bad)!important;color:#fff!important}
+.mut{color:var(--mut)}
+th{font-weight:600;color:var(--mut);text-align:right;padding:.6rem .75rem;white-space:nowrap}
+td{padding:.6rem .75rem;border-top:1px solid var(--line);white-space:nowrap}
+.tag{padding:.1rem .6rem;border-radius:99px;font-size:.8rem;background:var(--pri2);color:var(--pri)}
+@media print{body *{visibility:hidden}#slip,#slip *{visibility:visible}#slip{position:absolute;inset:0;border:0}.noprint{display:none!important}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const {useState,useEffect}=React; const html=htm.bind(React.createElement);
+/* ---------- طبقة البيانات: Supabase ---------- */
+const SB_URL='https://knqxsukmpfoqmfwuczbt.supabase.co', SB_KEY='sb_publishable_uaIEdKw0SmJ52IEm9n8LBw_MdqFglYp';
+const sb=supabase.createClient(SB_URL,SB_KEY);
+const sb2=supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});
+const t5=x=>x?String(x).slice(0,5):null;
+const toEmail=u=>u.includes('@')?u:u+'@company.local';
+const errMsg=e=>{const m=(e&&e.message)||'';return m.includes('OUT_OF_RANGE')?'أنت خارج نطاق الشركة':m.includes('LOCATION_REQUIRED')?'يلزم تحديد موقعك لتسجيل الحضور':m.includes('duplicate')?'تم تسجيل الحضور اليوم بالفعل':m};
+const run=async q=>{const {data,error}=await q;if(error){alert(errMsg(error));throw error}return data};
+async function loadAll(){
+ const [p,a,l,f,c]=await Promise.all(['profiles','attendance','leaves','finance','settings'].map(t=>run(sb.from(t).select('*'))));
+ return {users:p.map(x=>({id:x.id,username:x.username,name:x.name,role:x.role,salary:+x.salary,start:t5(x.start_time),end:t5(x.end_time),grace:x.grace,lateRate:+x.late_rate,absFactor:+x.abs_factor,joined:x.joined})),
+  att:a.map(x=>({id:x.id,uid:x.user_id,date:x.day,in:t5(x.check_in),out:t5(x.check_out),late:x.late_min,loc:x.in_lat!=null?{lat:x.in_lat,lng:x.in_lng,dist:x.in_dist}:null})),
+  leaves:l.map(x=>({id:x.id,uid:x.user_id,type:x.type,from:x.from_day,to:x.to_day,reason:x.reason,status:x.status})),
+  fin:f.map(x=>({id:x.id,uid:x.user_id,kind:x.kind,amount:+x.amount,reason:x.reason,date:x.day,status:x.status})),
+  cfg:c[0]?{lat:c[0].lat,lng:c[0].lng,radius:c[0].radius}:{lat:null,lng:null,radius:100}};
+}
+const mk=reload=>({
+ async checkIn(g){await run(sb.rpc('check_in',{lat:g.lat??null,lng:g.lng??null}));await reload()},
+ async checkOut(g){await run(sb.rpc('check_out',{lat:g.lat??null,lng:g.lng??null}));await reload()},
+ async addLeave(f,id){await run(sb.from('leaves').insert({user_id:id,type:f.type,from_day:f.from,to_day:f.to,reason:f.reason}));await reload()},
+ async setLeave(id,st){await run(sb.from('leaves').update({status:st}).eq('id',id));await reload()},
+ async addFin(x,adm){await run(sb.from('finance').insert({user_id:x.uid,kind:x.kind,amount:x.amount,reason:x.reason,status:adm?'approved':'pending'}));await reload()},
+ async setFin(id,st){await run(sb.from('finance').update({status:st}).eq('id',id));await reload()},
+ async saveCfg(c){await run(sb.from('settings').update(c).eq('id',1));await reload()},
+ async delEmp(id){await run(sb.from('profiles').delete().eq('id',id));await reload()},
+ async saveEmp(f){let id=f.id;
+  if(!id){const {data,error}=await sb2.auth.signUp({email:toEmail(f.username),password:f.password,options:{data:{name:f.name}}});if(error){alert(error.message);throw error}id=data.user.id}
+  await run(sb.from('profiles').update({name:f.name,salary:f.salary,start_time:f.start,end_time:f.end,grace:f.grace,late_rate:f.lateRate,abs_factor:f.absFactor,joined:f.joined}).eq('id',id));await reload()}
+});
+const pad=n=>String(n).padStart(2,'0');
+const ymd=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+const hm=d=>pad(d.getHours())+':'+pad(d.getMinutes());
+const toMin=t=>{const [h,m]=t.split(':').map(Number);return h*60+m};
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+const dist=(a,b,c,d)=>{const R=6371000,r=x=>x*Math.PI/180,dl=r(c-a),dn=r(d-b),h=Math.sin(dl/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(dn/2)**2;return 2*R*Math.asin(Math.sqrt(h))};
+const getPos=()=>new Promise((ok,no)=>navigator.geolocation?navigator.geolocation.getCurrentPosition(p=>ok(p.coords),e=>no(e),{enableHighAccuracy:true,timeout:15000,maximumAge:0}):no({code:0}));
+const egp=n=>(Math.round(n*100)/100).toLocaleString('ar-EG')+' ج.م';
+const seed=()=>({users:[
+ {id:'u1',username:'admin',password:'admin123',name:'مدير النظام',role:'admin',salary:0,start:'09:00',end:'17:00',grace:15,lateRate:1,absFactor:1,joined:'2026-01-01'},
+ {id:'u2',username:'ahmed',password:'1234',name:'أحمد محمد',role:'employee',salary:6000,start:'09:00',end:'17:00',grace:15,lateRate:2,absFactor:1,joined:'2026-01-01'},
+ {id:'u3',username:'sara',password:'1234',name:'سارة علي',role:'employee',salary:8000,start:'08:30',end:'16:30',grace:10,lateRate:3,absFactor:1.5,joined:'2026-01-01'}],
+ att:[],leaves:[],fin:[],cfg:{lat:null,lng:null,radius:100}});
+const LT=['سنوية','مرضية','عارضة','بدون أجر'], KIND={loan:'سلفة',bonus:'مكافأة',deduct:'خصم إداري'};
+const ST={pending:'قيد المراجعة',approved:'مقبول',rejected:'مرفوض'};
+
+function pay(db,u,ym){
+ const [Y,M]=ym.split('-').map(Number), last=new Date(Y,M,0).getDate(), now=ymd(new Date());
+ const att=db.att.filter(a=>a.uid==u.id&&a.date.startsWith(ym));
+ const lv=db.leaves.filter(l=>l.uid==u.id&&l.status=='approved');
+ let absent=0;
+ for(let d=1;d<=last;d++){
+  const ds=ym+'-'+pad(d), wd=new Date(Y,M-1,d).getDay();
+  if(ds>=now||wd==5||wd==6||ds<u.joined)continue;
+  if(att.some(a=>a.date==ds)||lv.some(l=>ds>=l.from&&ds<=l.to))continue;
+  absent++;
+ }
+ const lateMin=att.reduce((s,a)=>s+(a.late||0),0);
+ const fin=db.fin.filter(f=>f.uid==u.id&&f.date.startsWith(ym)&&f.status=='approved');
+ const sum=k=>fin.filter(f=>f.kind==k).reduce((s,f)=>s+f.amount,0);
+ const bonus=sum('bonus'),loan=sum('loan'),ded=sum('deduct');
+ const absAmt=absent*(u.salary/30)*u.absFactor, lateAmt=lateMin*u.lateRate;
+ return {absent,lateMin,bonus,loan,ded,absAmt,lateAmt,days:att.length,net:u.salary+bonus-(loan+absAmt+lateAmt+ded)};
+}
+const P={home:'M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',users:'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',clock:'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20M12 6v6l4 2',cal:'M3 4h18v18H3zM16 2v4M8 2v4M3 10h18',wallet:'M21 12V7H5a2 2 0 0 1 0-4h14v4M3 5v14a2 2 0 0 0 2 2h16v-5M18 12a2 2 0 0 0 0 4h4v-4z',file:'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8',out:'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',check:'M20 6L9 17l-5-5',x:'M18 6L6 18M6 6l12 12',plus:'M12 5v14M5 12h14',print:'M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6z',trash:'M3 6h18M19 6l-1 14H6L5 6M10 11v6M14 11v6M9 6V4h6v2'};
+const Ic=({n,s=18})=>html`<svg width=${s} height=${s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d=${P[n]}/></svg>`;
+const Fld=(l,v,set,type='text',extra={})=>html`<label className="block text-sm"><span className="mut">${l}</span><input className="inp mt-1" type=${type} value=${v} onChange=${e=>set(type=='number'?+e.target.value:e.target.value)} ...${extra}/></label>`;
+const Stat=({l,v,i})=>html`<div className="card p-4 flex items-center gap-3"><div className="p-2.5 rounded-xl" style=${{background:'var(--pri2)',color:'var(--pri)'}}><${Ic} n=${i} s=${22}/></div><div><div className="mut text-sm">${l}</div><div className="text-xl font-bold">${v}</div></div></div>`;
+const Tbl=({h,children})=>html`<div className="card overflow-x-auto"><table className="w-full text-sm"><thead><tr>${h.map(x=>html`<th key=${x}>${x}</th>`)}</tr></thead><tbody>${children}</tbody></table></div>`;
+const Empty=({t})=>html`<div className="card p-6 text-center mut">${t}</div>`;
+
+function Login({db,onIn}){
+ const [u,setU]=useState(''),[p,setP]=useState(''),[e,setE]=useState('');
+ const go=async()=>{setE('');const r=await onIn(u,p);if(r)setE(r)};
+ const fill=(a,b)=>{setU(a);setP(b);setE('')};
+ return html`<div className="min-h-screen grid place-items-center p-4"><div className="w-full max-w-sm">
+  <h1 className="text-2xl font-bold mb-1">شؤون الموظفين والرواتب</h1><p className="mut mb-5">سجّل الدخول للمتابعة</p>
+  <div className="card p-5 space-y-3">
+   ${Fld('اسم المستخدم',u,setU,'text',{autoComplete:'username'})}
+   ${Fld('كلمة المرور',p,setP,'password',{onKeyDown:e=>e.key=='Enter'&&go()})}
+   ${e&&html`<div className="text-sm" style=${{color:'var(--bad)'}}>${e}</div>`}
+   <button className="btn w-full justify-center" onClick=${go}>دخول</button>
+  </div>
+  
+ </div></div>`;
+}
+
+function Dash({db,me,A}){
+ const today=ymd(new Date()), mine=db.att.find(a=>a.uid==me.id&&a.date==today), ym=today.slice(0,7);
+ const [msg,setMsg]=useState('');
+ const chk=async()=>{const c=db.cfg||{};if(c.lat==null)return {};setMsg('جارٍ تحديد موقعك...');try{const p=await getPos(),d=dist(c.lat,c.lng,p.latitude,p.longitude);if(d>c.radius){setMsg('أنت خارج نطاق الشركة. المسافة '+Math.round(d)+' متر والمسموح '+c.radius+' متر.');return null}setMsg('');return {lat:p.latitude,lng:p.longitude,dist:Math.round(d)}}catch(e){setMsg(e&&e.code==1?'تم رفض إذن الموقع. فعّل الموقع للمتصفح ثم أعد المحاولة.':'تعذّر تحديد موقعك. تأكد من تشغيل GPS وأعد المحاولة.');return null}};
+ const cin=async()=>{const g=await chk();if(!g)return;A.checkIn(g).catch(()=>{})};
+ const cout=async()=>{const g=await chk();if(!g)return;A.checkOut(g).catch(()=>{})};
+ if(me.role=='admin'){
+  const emps=db.users.filter(u=>u.role=='employee'), pres=db.att.filter(a=>a.date==today).length;
+  const tot=emps.reduce((s,u)=>s+pay(db,u,ym).net,0);
+  return html`<div className="space-y-4"><div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+   <${Stat} l="عدد الموظفين" v=${emps.length} i="users"/><${Stat} l="حاضرون اليوم" v=${pres} i="clock"/>
+   <${Stat} l="إجازات قيد المراجعة" v=${db.leaves.filter(l=>l.status=='pending').length} i="cal"/>
+   <${Stat} l="صافي رواتب الشهر" v=${egp(tot)} i="wallet"/></div><${Loc} db=${db} A=${A}/>
+   <${Att} db=${db} me=${me}/></div>`;
+ }
+ const p=pay(db,me,ym);
+ return html`<div className="space-y-4">
+  <div className="card p-5"><div className="mut text-sm">${new Date().toLocaleDateString('ar-EG',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}</div>
+   <div className="text-lg font-bold mt-1">أهلاً ${me.name}</div><div className="mut text-sm">الدوام: ${me.start} – ${me.end} (سماح ${me.grace} دقيقة)</div>
+   <div className="flex gap-2 mt-4 flex-wrap">
+    <button className="btn" disabled=${!!mine} style=${{opacity:mine?.5:1}} onClick=${cin}><${Ic} n="clock"/>تسجيل حضور</button>
+    <button className="btn btn2" disabled=${!mine||!!(mine&&mine.out)} style=${{opacity:!mine||mine.out?.5:1}} onClick=${cout}><${Ic} n="out"/>تسجيل انصراف</button></div>
+   ${msg&&html`<div className="mt-3 text-sm" style=${{color:msg.startsWith('جارٍ')?'var(--mut)':'var(--bad)'}}>${msg}</div>`}
+   ${mine&&html`<div className="mt-3 text-sm">حضور: <b>${mine.in}</b> ${mine.out&&html`· انصراف: <b>${mine.out}</b>`} ${mine.late>0&&html`<span className="tag bad">تأخير ${mine.late} دقيقة</span>`}</div>`}</div>
+  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3"><${Stat} l="أيام الحضور" v=${p.days} i="check"/><${Stat} l="أيام الغياب" v=${p.absent} i="x"/><${Stat} l="دقائق التأخير" v=${p.lateMin} i="clock"/><${Stat} l="صافي الراتب (حتى الآن)" v=${egp(p.net)} i="wallet"/></div>
+  <${Att} db=${db} me=${me}/></div>`;
+}
+
+function Att({db,me}){
+ const rows=db.att.filter(a=>me.role=='admin'||a.uid==me.id).sort((a,b)=>(b.date+b.in).localeCompare(a.date+a.in)).slice(0,40);
+ const nm=id=>(db.users.find(u=>u.id==id)||{}).name;
+ return html`<div><h2 className="font-bold mb-2">سجل الحضور</h2>${rows.length?html`<${Tbl} h=${['التاريخ',me.role=='admin'?'الموظف':'اليوم','حضور','انصراف','التأخير','الموقع']}>${rows.map(a=>html`<tr key=${a.id}><td>${a.date}</td><td>${me.role=='admin'?nm(a.uid):new Date(a.date).toLocaleDateString('ar-EG',{weekday:'long'})}</td><td>${a.in}</td><td>${a.out||'—'}</td><td>${a.late?a.late+' د':'—'}</td><td>${a.loc?html`<a href=${'https://www.google.com/maps?q='+a.loc.lat+','+a.loc.lng} target="_blank" rel="noopener" style=${{color:'var(--pri)'}}>${a.loc.dist} م</a>`:'—'}</td></tr>`)}<//>`:html`<${Empty} t="لا توجد سجلات بعد. سجّل أول حضور من لوحتك."/>`}</div>`;
+}
+
+function Loc({db,A}){
+ const c=db.cfg||{lat:null,lng:null,radius:100}; const [f,setF]=useState({lat:c.lat??'',lng:c.lng??'',radius:c.radius||100}); const [m,setM]=useState('');
+ const here=async()=>{setM('جارٍ تحديد الموقع...');try{const p=await getPos();setF({...f,lat:+p.latitude.toFixed(6),lng:+p.longitude.toFixed(6)});setM('تم التقاط موقعك. اضغط حفظ.')}catch(e){setM('تعذّر تحديد الموقع. أدخل الإحداثيات يدوياً.')}};
+ const save=()=>{const la=parseFloat(f.lat),ln=parseFloat(f.lng);if(isNaN(la)||isNaN(ln)||la<-90||la>90||ln<-180||ln>180)return alert('أدخل إحداثيات صحيحة');A.saveCfg({lat:la,lng:ln,radius:+f.radius||100}).then(()=>setM('تم حفظ موقع الشركة')).catch(()=>{})};
+ const clr=()=>{A.saveCfg({lat:null,lng:null,radius:100});setF({lat:'',lng:'',radius:100});setM('تم إلغاء ربط الموقع')};
+ return html`<div className="card p-4 space-y-3"><div className="font-bold">موقع الشركة للحضور والانصراف</div><div className="mut text-sm">${c.lat==null?'غير مفعّل: يمكن للموظفين التسجيل من أي مكان.':'مفعّل: التسجيل مسموح ضمن '+c.radius+' متر من الموقع المحدد.'}</div>
+ <div className="grid sm:grid-cols-3 gap-3">${Fld('خط العرض',f.lat,v=>setF({...f,lat:v}),'text',{inputMode:'decimal',dir:'ltr'})}${Fld('خط الطول',f.lng,v=>setF({...f,lng:v}),'text',{inputMode:'decimal',dir:'ltr'})}${Fld('نصف القطر المسموح (متر)',f.radius,v=>setF({...f,radius:v}),'number')}</div>
+ <div className="flex gap-2 flex-wrap"><button className="btn btn2" onClick=${here}>استخدام موقعي الحالي</button><button className="btn" onClick=${save}>حفظ</button>${c.lat!=null&&html`<button className="btn btn2" onClick=${clr}>إلغاء الربط</button>`}</div>${m&&html`<div className="text-sm mut">${m}</div>`}</div>`;
+}
+
+function Emps({db,A}){
+ const blank={name:'',username:'',password:'',salary:5000,start:'09:00',end:'17:00',grace:15,lateRate:1,absFactor:1,joined:ymd(new Date())};
+ const [f,setF]=useState(null); const set=k=>v=>setF({...f,[k]:v});
+ const save=()=>{if(!f.name||!f.username||(!f.id&&!f.password))return alert('الاسم واسم المستخدم وكلمة المرور مطلوبة');
+  if(db.users.some(u=>u.username==f.username&&u.id!=f.id))return alert('اسم المستخدم مستخدم بالفعل');
+  A.saveEmp(f).then(()=>setF(null)).catch(()=>{})};
+ const emps=db.users.filter(u=>u.role=='employee');
+ return html`<div className="space-y-4"><div className="flex justify-between items-center"><h2 className="font-bold text-lg">الموظفون</h2><button className="btn" onClick=${()=>setF(blank)}><${Ic} n="plus"/>موظف جديد</button></div>
+ ${f&&html`<div className="card p-4"><div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+  ${Fld('الاسم',f.name,set('name'))}${Fld('اسم المستخدم',f.username,set('username'))}${!f.id&&Fld('كلمة المرور (6 أحرف على الأقل)',f.password||'',set('password'))}
+  ${Fld('الراتب الأساسي (ج.م)',f.salary,set('salary'),'number')}${Fld('بداية الدوام',f.start,set('start'),'time')}${Fld('نهاية الدوام',f.end,set('end'),'time')}
+  ${Fld('فترة السماح (دقيقة)',f.grace,set('grace'),'number')}${Fld('خصم الدقيقة (ج.م)',f.lateRate,set('lateRate'),'number')}${Fld('أيام الخصم لكل غياب',f.absFactor,set('absFactor'),'number',{step:'0.5'})}
+  ${Fld('تاريخ التعيين',f.joined,set('joined'),'date')}</div>
+  <div className="flex gap-2 mt-4"><button className="btn" onClick=${save}>حفظ</button><button className="btn btn2" onClick=${()=>setF(null)}>إلغاء</button></div></div>`}
+ ${emps.length?html`<${Tbl} h=${['الموظف','المستخدم','الراتب','الدوام','السماح','خصم/دقيقة','الغياب','']}>${emps.map(u=>html`<tr key=${u.id}><td className="font-semibold">${u.name}</td><td>${u.username}</td><td>${egp(u.salary)}</td><td>${u.start}–${u.end}</td><td>${u.grace} د</td><td>${u.lateRate} ج.م</td><td>×${u.absFactor} يوم</td>
+  <td className="flex gap-2"><button className="btn btn2" onClick=${()=>setF(u)}>تعديل</button><button className="btn btn2" aria-label="حذف" onClick=${()=>confirm('حذف الموظف وكل بياناته؟ احذف حسابه أيضاً من Authentication في Supabase.')&&A.delEmp(u.id)}><${Ic} n="trash"/></button></td></tr>`)}<//>`:html`<${Empty} t="لا يوجد موظفون. أضف أول موظف لإنشاء حسابه."/>`}</div>`;
+}
+
+function Leaves({db,me,A}){
+ const adm=me.role=='admin', [f,setF]=useState({type:LT[0],from:ymd(new Date()),to:ymd(new Date()),reason:''});
+ const nm=id=>(db.users.find(u=>u.id==id)||{}).name;
+ const rows=db.leaves.filter(l=>adm||l.uid==me.id).sort((a,b)=>b.from.localeCompare(a.from));
+ const send=()=>{if(f.to<f.from)return alert('تاريخ النهاية قبل البداية');A.addLeave(f,me.id).then(()=>setF({...f,reason:''})).catch(()=>{})};
+ const setS=(id,s)=>A.setLeave(id,s);
+ return html`<div className="space-y-4"><h2 className="font-bold text-lg">الإجازات</h2>
+ ${!adm&&html`<div className="card p-4 grid sm:grid-cols-4 gap-3 items-end"><label className="text-sm"><span className="mut">النوع</span><select className="inp mt-1" value=${f.type} onChange=${e=>setF({...f,type:e.target.value})}>${LT.map(t=>html`<option key=${t}>${t}</option>`)}</select></label>
+  ${Fld('من',f.from,v=>setF({...f,from:v}),'date')}${Fld('إلى',f.to,v=>setF({...f,to:v}),'date')}${Fld('السبب',f.reason,v=>setF({...f,reason:v}))}
+  <button className="btn justify-center sm:col-span-4" onClick=${send}>إرسال الطلب</button></div>`}
+ ${rows.length?html`<${Tbl} h=${['الموظف','النوع','من','إلى','السبب','الحالة','']}>${rows.map(l=>html`<tr key=${l.id}><td>${nm(l.uid)}</td><td>${l.type}</td><td>${l.from}</td><td>${l.to}</td><td>${l.reason||'—'}</td><td><span className="tag">${ST[l.status]}</span></td>
+  <td>${adm&&l.status=='pending'&&html`<span className="flex gap-2"><button className="btn" onClick=${()=>setS(l.id,'approved')}><${Ic} n="check"/>قبول</button><button className="btn bad" onClick=${()=>setS(l.id,'rejected')}><${Ic} n="x"/>رفض</button></span>`}</td></tr>`)}<//>`:html`<${Empty} t="لا توجد طلبات إجازة."/>`}</div>`;
+}
+
+function Fin({db,me,A}){
+ const adm=me.role=='admin', emps=db.users.filter(u=>u.role=='employee');
+ const [f,setF]=useState({uid:emps[0]?emps[0].id:'',kind:'bonus',amount:0,reason:''});
+ const nm=id=>(db.users.find(u=>u.id==id)||{}).name;
+ const rows=db.fin.filter(x=>adm||x.uid==me.id).sort((a,b)=>b.date.localeCompare(a.date));
+ const add=()=>{if(!(f.amount>0))return alert('أدخل مبلغاً صحيحاً');
+  A.addFin({uid:adm?f.uid:me.id,kind:adm?f.kind:'loan',amount:f.amount,reason:f.reason},adm).then(()=>setF({...f,amount:0,reason:''})).catch(()=>{})};
+ const setS=(id,s)=>A.setFin(id,s);
+ return html`<div className="space-y-4"><h2 className="font-bold text-lg">${adm?'السلف والمكافآت والخصومات':'طلب سلفة'}</h2>
+ <div className="card p-4 grid sm:grid-cols-4 gap-3 items-end">
+  ${adm&&html`<label className="text-sm"><span className="mut">الموظف</span><select className="inp mt-1" value=${f.uid} onChange=${e=>setF({...f,uid:e.target.value})}>${emps.map(u=>html`<option key=${u.id} value=${u.id}>${u.name}</option>`)}</select></label>
+  <label className="text-sm"><span className="mut">النوع</span><select className="inp mt-1" value=${f.kind} onChange=${e=>setF({...f,kind:e.target.value})}>${Object.entries(KIND).map(([k,v])=>html`<option key=${k} value=${k}>${v}</option>`)}</select></label>`}
+  ${Fld('المبلغ (ج.م)',f.amount,v=>setF({...f,amount:v}),'number')}${Fld('السبب',f.reason,v=>setF({...f,reason:v}))}
+  <button className="btn justify-center sm:col-span-4" onClick=${add}>${adm?'تسجيل الحركة':'إرسال طلب السلفة'}</button></div>
+ ${rows.length?html`<${Tbl} h=${['التاريخ','الموظف','النوع','المبلغ','السبب','الحالة','']}>${rows.map(x=>html`<tr key=${x.id}><td>${x.date}</td><td>${nm(x.uid)}</td><td>${KIND[x.kind]}</td><td>${egp(x.amount)}</td><td>${x.reason||'—'}</td><td><span className="tag">${ST[x.status]}</span></td>
+  <td>${adm&&x.status=='pending'&&html`<span className="flex gap-2"><button className="btn" onClick=${()=>setS(x.id,'approved')}>قبول</button><button className="btn bad" onClick=${()=>setS(x.id,'rejected')}>رفض</button></span>`}</td></tr>`)}<//>`:html`<${Empty} t="لا توجد حركات مالية."/>`}</div>`;
+}
+
+function Payroll({db,me}){
+ const adm=me.role=='admin', [ym,setYm]=useState(ymd(new Date()).slice(0,7)), [sel,setSel]=useState(adm?null:me.id);
+ const emps=adm?db.users.filter(u=>u.role=='employee'):[me], u=db.users.find(x=>x.id==sel);
+ const row=(l,v,neg)=>html`<tr key=${l}><td>${l}</td><td className="font-semibold" style=${{color:neg?'var(--bad)':'var(--ok)'}}>${neg?'−':'+'} ${egp(v)}</td></tr>`;
+ return html`<div className="space-y-4"><div className="flex flex-wrap items-end gap-3 noprint"><h2 className="font-bold text-lg ml-auto">كشوف الرواتب</h2><label className="text-sm"><span className="mut">الشهر والسنة</span><input className="inp mt-1" type="month" value=${ym} onChange=${e=>e.target.value&&setYm(e.target.value)}/></label></div>
+ ${adm&&html`<div className="noprint"><${Tbl} h=${['الموظف','الأساسي','مكافآت','سلف','تأخير','غياب','خصومات','الصافي','']}>${emps.map(e=>{const p=pay(db,e,ym);return html`<tr key=${e.id}><td className="font-semibold">${e.name}</td><td>${egp(e.salary)}</td><td>${egp(p.bonus)}</td><td>${egp(p.loan)}</td><td>${egp(p.lateAmt)}</td><td>${egp(p.absAmt)}</td><td>${egp(p.ded)}</td><td className="font-bold">${egp(p.net)}</td><td><button className="btn btn2" onClick=${()=>setSel(e.id)}>كشف</button></td></tr>`})}<//></div>`}
+ ${u&&(()=>{const p=pay(db,u,ym);return html`<div id="slip" className="card p-5 max-w-xl"><div className="flex justify-between items-start mb-3"><div><div className="text-lg font-bold">كشف راتب شهر ${ym}</div><div className="mut text-sm">${u.name} · ${u.username}</div></div><button className="btn noprint" onClick=${()=>window.print()}><${Ic} n="print"/>طباعة / PDF</button></div>
+  <table className="w-full text-sm"><tbody>${row('الراتب الأساسي',u.salary)}${row('المكافآت والحوافز',p.bonus)}${row('السلف المخصومة',p.loan,1)}${row('خصم التأخير ('+p.lateMin+' دقيقة)',p.lateAmt,1)}${row('خصم الغياب ('+p.absent+' يوم)',p.absAmt,1)}${row('الخصومات الإدارية',p.ded,1)}
+  <tr><td className="font-bold text-lg">صافي الراتب</td><td className="font-bold text-lg">${egp(p.net)}</td></tr></tbody></table>
+  <p className="mut text-xs mt-3">الجمعة والسبت عطلة أسبوعية. الإجازات المقبولة لا تُحتسب غياباً.</p></div>`})()}</div>`;
+}
+
+function App(){
+ const [db,setDb]=useState(null),[sid,setSid]=useState(undefined),[tab,setTab]=useState('dash');
+ const reload=async()=>setDb(await loadAll());
+ useEffect(()=>{sb.auth.getSession().then(({data})=>setSid(data.session?data.session.user.id:null));
+  const {data}=sb.auth.onAuthStateChange((_e,x)=>{setSid(x?x.user.id:null);setTab('dash')});return()=>data.subscription.unsubscribe()},[]);
+ useEffect(()=>{if(sid)loadAll().then(setDb).catch(()=>{});else setDb(null)},[sid]);
+ const A=mk(reload), Ld=html`<div className="min-h-screen grid place-items-center mut">جارٍ التحميل...</div>`;
+ if(sid===undefined)return Ld;
+ if(!sid)return html`<${Login} onIn=${async(u,p)=>{const {error}=await sb.auth.signInWithPassword({email:toEmail(u.trim()),password:p});return error?'اسم المستخدم أو كلمة المرور غير صحيحة':''}}/>`;
+ if(!db)return Ld;
+ const me=db.users.find(u=>u.id==sid);
+ if(!me)return html`<div className="min-h-screen grid place-items-center p-6 text-center"><div>لا يوجد ملف شخصي لهذا الحساب. تأكد من تشغيل سكربت SQL قبل إنشاء الحساب.<br/><button className="btn mt-4" onClick=${()=>sb.auth.signOut()}>خروج</button></div></div>`;
+ const adm=me.role=='admin';
+ const nav=adm?[['dash','لوحة التحكم','home'],['emps','الموظفون','users'],['att','الحضور','clock'],['leaves','الإجازات','cal'],['fin','الحركات المالية','wallet'],['pay','الرواتب','file']]:[['dash','لوحتي','home'],['leaves','إجازاتي','cal'],['fin','السلف','wallet'],['pay','كشف الراتب','file']];
+ const V={dash:Dash,emps:Emps,att:()=>html`<${Att} db=${db} me=${me}/>`,leaves:Leaves,fin:Fin,pay:Payroll}[tab];
+ return html`<div className="min-h-screen lg:flex">
+  <aside className="noprint hidden lg:flex flex-col w-60 p-4 gap-1 card rounded-none border-0 border-l"><div className="font-bold text-lg mb-4" style=${{color:'var(--pri)'}}>شؤون الموظفين</div>
+   ${nav.map(([k,l,i])=>html`<button key=${k} onClick=${()=>setTab(k)} className="btn text-right w-full" style=${tab==k?{}:{background:'transparent',color:'var(--ink)'}}><${Ic} n=${i}/>${l}</button>`)}
+   <div className="mt-auto text-sm mut">${me.name}</div><button className="btn btn2" onClick=${()=>{sb.auth.signOut()}}><${Ic} n="out"/>خروج</button></aside>
+  <main className="flex-1 p-4 pb-24 lg:pb-6 max-w-5xl w-full mx-auto"><div className="noprint flex justify-between items-center mb-4 lg:hidden"><b>${me.name}</b><button className="btn btn2" aria-label="خروج" onClick=${()=>{sb.auth.signOut()}}><${Ic} n="out"/></button></div>
+   <${V} db=${db} me=${me} A=${A}/></main>
+  <nav className="noprint lg:hidden fixed bottom-0 inset-x-0 card rounded-none border-x-0 border-b-0 flex justify-around py-1" style=${{paddingBottom:'calc(.25rem + env(safe-area-inset-bottom,0px))'}}>
+   ${nav.map(([k,l,i])=>html`<button key=${k} onClick=${()=>setTab(k)} className="flex flex-col items-center text-[11px] p-1.5 gap-0.5" style=${{color:tab==k?'var(--pri)':'var(--mut)'}}><${Ic} n=${i}/>${l.split(' ')[0]}</button>`)}</nav></div>`;
+}
+ReactDOM.createRoot(document.getElementById('root')).render(html`<${App}/>`);
+</script>
+</body>
+</html>
